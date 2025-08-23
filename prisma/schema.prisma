@@ -1,0 +1,208 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  guest
+  housekeeping
+  lobby_manager
+  general_manager
+  super_admin
+}
+
+enum TicketStatus {
+  pending
+  in_progress
+  completed
+  cancelled
+}
+
+enum TicketPriority {
+  low
+  medium
+  high
+  urgent
+}
+
+enum Department {
+  housekeeping
+  maintenance
+  front_desk
+  concierge
+  room_service
+}
+
+enum NotificationStatus {
+  unread
+  read
+  archived
+}
+
+model User {
+  id                String    @id @default(cuid())
+  clerk_id          String    @unique
+  email             String    @unique
+  first_name        String?
+  last_name         String?
+  phone_number      String?
+  role              UserRole  @default(guest)
+  hotel_id          String?
+  room_number       String?
+  preferences       Json?
+  active            Boolean   @default(true)
+  last_active       DateTime?
+  created_at        DateTime  @default(now())
+  updated_at        DateTime  @updatedAt
+
+  // Relations
+  created_tickets   Ticket[]     @relation("CreatedTickets")
+  assigned_tickets  Ticket[]     @relation("AssignedTickets")
+  voice_sessions    VoiceSession[]
+  notifications     Notification[]
+  audit_logs        AuditLog[]
+
+  @@index([clerk_id])
+  @@index([email])
+  @@index([role])
+  @@index([hotel_id])
+  @@index([room_number])
+  @@map("users")
+}
+
+model Ticket {
+  id                String         @id @default(cuid())
+  title             String
+  description       String
+  status            TicketStatus   @default(pending)
+  priority          TicketPriority @default(medium)
+  department        Department
+  room_number       String?
+  guest_notes       String?
+  staff_notes       String?
+  estimated_time    Int?           // in minutes
+  actual_time       Int?           // in minutes
+  created_at        DateTime       @default(now())
+  updated_at        DateTime       @updatedAt
+  completed_at      DateTime?
+  due_date          DateTime?
+
+  // Foreign keys
+  created_by        String
+  assigned_to       String?
+  voice_session_id  String?
+
+  // Relations
+  creator           User           @relation("CreatedTickets", fields: [created_by], references: [id])
+  assignee          User?          @relation("AssignedTickets", fields: [assigned_to], references: [id])
+  voice_session     VoiceSession?  @relation(fields: [voice_session_id], references: [id])
+  notifications     Notification[]
+  audit_logs        AuditLog[]
+
+  @@index([status])
+  @@index([priority])
+  @@index([department])
+  @@index([created_by])
+  @@index([assigned_to])
+  @@index([room_number])
+  @@index([created_at])
+  @@map("tickets")
+}
+
+model VoiceSession {
+  id                  String    @id @default(cuid())
+  user_id             String
+  transcript          String?
+  audio_file_url      String?
+  response_text       String?
+  response_audio_url  String?
+  intent_classification Json?
+  confidence_score    Float?
+  processing_time     Int?      // in milliseconds
+  language            String    @default("en")
+  created_at          DateTime  @default(now())
+  updated_at          DateTime  @updatedAt
+
+  // Relations
+  user                User      @relation(fields: [user_id], references: [id])
+  tickets             Ticket[]
+
+  @@index([user_id])
+  @@index([created_at])
+  @@map("voice_sessions")
+}
+
+model Notification {
+  id          String             @id @default(cuid())
+  user_id     String
+  title       String
+  message     String
+  type        String             // info, warning, error, success
+  status      NotificationStatus @default(unread)
+  ticket_id   String?
+  metadata    Json?
+  created_at  DateTime           @default(now())
+  read_at     DateTime?
+
+  // Relations
+  user        User               @relation(fields: [user_id], references: [id])
+  ticket      Ticket?            @relation(fields: [ticket_id], references: [id])
+
+  @@index([user_id])
+  @@index([status])
+  @@index([created_at])
+  @@map("notifications")
+}
+
+model AuditLog {
+  id            String   @id @default(cuid())
+  user_id       String
+  action        String
+  resource_type String
+  resource_id   String?
+  old_values    Json?
+  new_values    Json?
+  ip_address    String?
+  user_agent    String?
+  created_at    DateTime @default(now())
+
+  // Relations
+  user          User     @relation(fields: [user_id], references: [id])
+  ticket        Ticket?  @relation(fields: [resource_id], references: [id])
+
+  @@index([user_id])
+  @@index([resource_type])
+  @@index([resource_id])
+  @@index([created_at])
+  @@map("audit_logs")
+}
+
+model Role {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  description String?
+  permissions Json?    // Array of permission strings
+  created_at  DateTime @default(now())
+  updated_at  DateTime @updatedAt
+
+  @@map("roles")
+}
+
+model Permission {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  description String?
+  resource    String   // users, tickets, voice_sessions, etc.
+  actions     Json     // Array of actions: create, read, update, delete
+  created_at  DateTime @default(now())
+
+  @@map("permissions")
+}
+
