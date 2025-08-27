@@ -48,8 +48,8 @@ enum NotificationStatus {
 
 model User {
   id                String    @id @default(cuid())
-  clerk_id          String    @unique
   email             String    @unique
+  password_hash     String?   // For local authentication
   first_name        String?
   last_name         String?
   phone_number      String?
@@ -69,7 +69,6 @@ model User {
   notifications     Notification[]
   audit_logs        AuditLog[]
 
-  @@index([clerk_id])
   @@index([email])
   @@index([role])
   @@index([hotel_id])
