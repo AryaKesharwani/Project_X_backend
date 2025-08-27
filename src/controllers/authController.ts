@@ -76,6 +76,14 @@ export class AuthController {
   // Super Admin signup (password-based authentication)
   static async superAdminSignup(req: Request, res: Response, next: NextFunction) {
     try {
+      console.log('🚀 Super Admin Signup Request:', {
+        email: req.body.email,
+        firstName: req.body.first_name,
+        lastName: req.body.last_name,
+        hasPassword: !!req.body.password,
+        hotelId: req.body.hotel_id
+      });
+
       const {
         email,
         password,
@@ -86,6 +94,7 @@ export class AuthController {
 
       // Validate required fields
       if (!email || !password || !first_name || !last_name) {
+        console.log('❌ Missing required fields');
         return res.status(400).json({
           success: false,
           error: 'Missing required fields: email, password, first_name, and last_name',
@@ -93,12 +102,15 @@ export class AuthController {
         } as APIResponse);
       }
 
-      // Check if user already exists
+      console.log('✅ Required fields validated');
+
+      // Check if user already exists in our database
       const existingUser = await prisma.user.findUnique({
         where: { email },
       });
 
       if (existingUser) {
+        console.log('❌ User already exists in database:', existingUser.id);
         return res.status(409).json({
           success: false,
           error: 'User with this email already exists',
@@ -106,12 +118,15 @@ export class AuthController {
         } as APIResponse);
       }
 
+      console.log('✅ No existing user found in database');
+
       // Check if super admin already exists (only allow one)
       const existingSuperAdmin = await prisma.user.findFirst({
         where: { role: UserRole.super_admin },
       });
 
       if (existingSuperAdmin) {
+        console.log('❌ Super admin already exists:', existingSuperAdmin.id);
         return res.status(403).json({
           success: false,
           error: 'Super admin account already exists',
@@ -119,36 +134,78 @@ export class AuthController {
         } as APIResponse);
       }
 
-      // Create super admin user
-      const user = await prisma.user.create({
-        data: {
-          clerk_id: `super_admin_${Date.now()}`, // Generate unique ID for super admin
+      console.log('✅ No existing super admin found');
+
+      try {
+        console.log('🔐 Attempting to create user in Clerk...');
+        
+        // Create user in Clerk first
+        const clerkUser = await ClerkService.createUser({
           email,
-          first_name,
-          last_name,
-          role: UserRole.super_admin,
-          hotel_id,
-          preferences: {
-            language: 'en',
-            voice_enabled: true,
-            notifications_enabled: true,
-            theme: 'dark'
+          firstName: first_name,
+          lastName: last_name,
+          password, // Include password for Clerk
+          publicMetadata: {
+            role: UserRole.super_admin,
+            hotel_id,
+            preferences: {
+              language: 'en',
+              voice_enabled: true,
+              notifications_enabled: true,
+              theme: 'dark'
+            }
+          }
+        });
+
+        console.log('✅ User created in Clerk successfully:', clerkUser.id);
+
+        console.log('💾 Creating user in database...');
+        
+        // Create super admin user in our database with Clerk ID
+        const user = await prisma.user.create({
+          data: {
+            clerk_id: clerkUser.id, // Use actual Clerk ID
+            email,
+            first_name,
+            last_name,
+            role: UserRole.super_admin,
+            hotel_id,
+            preferences: {
+              language: 'en',
+              voice_enabled: true,
+              notifications_enabled: true,
+              theme: 'dark'
+            },
           },
-        },
-      });
+        });
 
-      // Generate JWT token for super admin
-      // Note: In production, you should use a proper JWT library and secret
-      const token = `super_admin_token_${user.id}_${Date.now()}`;
+        console.log('✅ User created in database successfully:', user.id);
 
-      res.status(201).json({
-        success: true,
-        data: { user, token },
-        message: 'Super admin account created successfully',
-        timestamp: new Date().toISOString()
-      } as APIResponse<{ user: User; token: string }>);
+        // Generate JWT token for super admin
+        // Note: In production, you should use a proper JWT library and secret
+        const token = `super_admin_token_${user.id}_${Date.now()}`;
+
+        console.log('🎉 Super admin signup completed successfully');
+
+        res.status(201).json({
+          success: true,
+          data: { user, token },
+          message: 'Super admin account created successfully in both Clerk and database',
+          timestamp: new Date().toISOString()
+        } as APIResponse<{ user: User; token: string }>);
+
+      } catch (clerkError) {
+        // If Clerk creation fails, clean up and return error
+        console.error('❌ Failed to create super admin in Clerk:', clerkError);
+        return res.status(500).json({
+          success: false,
+          error: 'Failed to create super admin in authentication system',
+          timestamp: new Date().toISOString()
+        } as APIResponse);
+      }
 
     } catch (error) {
+      console.error('❌ Unexpected error in super admin signup:', error);
       next(error);
     }
   }

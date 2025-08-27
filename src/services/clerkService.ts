@@ -24,6 +24,15 @@ export class ClerkService {
    */
   static async createUser(userData: ClerkUserData): Promise<ClerkUser> {
     try {
+      console.log('🔐 Creating user in Clerk:', { 
+        email: userData.email, 
+        firstName: userData.firstName, 
+        lastName: userData.lastName,
+        hasPassword: !!userData.password,
+        metadata: userData.publicMetadata
+      });
+
+      // Create user with the new Clerk API
       const user = await clerkClient.users.createUser({
         emailAddress: [userData.email],
         firstName: userData.firstName,
@@ -31,6 +40,8 @@ export class ClerkService {
         password: userData.password,
         publicMetadata: userData.publicMetadata || {},
       });
+
+      console.log('✅ User created successfully in Clerk:', user.id);
 
       return {
         id: user.id,
@@ -42,7 +53,12 @@ export class ClerkService {
         updatedAt: new Date(user.updatedAt),
       };
     } catch (error) {
-      console.error('Failed to create user in Clerk:', error);
+      console.error('❌ Failed to create user in Clerk:', error);
+      console.error('Error details:', {
+        message: error instanceof Error ? error.message : 'Unknown error',
+        stack: error instanceof Error ? error.stack : undefined,
+        userData: { email: userData.email, firstName: userData.firstName, lastName: userData.lastName }
+      });
       throw new Error(`Failed to create user in Clerk: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
   }
