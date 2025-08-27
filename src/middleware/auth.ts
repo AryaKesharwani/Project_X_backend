@@ -25,17 +25,17 @@ export const authenticateUser = async (
 
     const token = authHeader.substring(7); // Remove 'Bearer ' prefix
 
-    // In a real implementation, you would verify the Clerk JWT token here
-    // For now, we'll simulate user lookup
-    const clerkUserId = token; // This would be extracted from the verified JWT
+    // For Clerk integration, treat the token as clerk_id
+    // In production, you would verify the Clerk JWT here
+    const clerkId = token;
 
-    // Fetch user from database
+    // Fetch user from database by clerk_id
     const user = await prisma.user.findUnique({
-      where: { clerk_id: clerkUserId },
+      where: { clerk_id: clerkId },
     });
 
-    if (!user) {
-      throw new AuthenticationError('User not found');
+    if (!user || !user.active) {
+      throw new AuthenticationError('User not found or inactive');
     }
 
     // Attach user to request
