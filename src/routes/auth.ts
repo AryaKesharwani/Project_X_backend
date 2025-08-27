@@ -8,7 +8,7 @@ const router = Router();
  * @swagger
  * /api/auth/register:
  *   post:
- *     summary: Register a new user with Clerk
+ *     summary: Register a new user with local authentication
  *     tags: [Authentication]
  *     requestBody:
  *       required: true
@@ -17,16 +17,16 @@ const router = Router();
  *           schema:
  *             type: object
  *             required:
- *               - clerk_id
  *               - email
+ *               - password
  *             properties:
- *               clerk_id:
- *                 type: string
- *                 description: Clerk user ID
  *               email:
  *                 type: string
  *                 format: email
  *                 description: User email address
+ *               password:
+ *                 type: string
+ *                 description: User password
  *               first_name:
  *                 type: string
  *                 description: User first name
@@ -60,6 +60,43 @@ const router = Router();
  *         description: User already exists
  */
 router.post('/register', AuthController.register);
+
+/**
+ * @swagger
+ * /api/auth/login:
+ *   post:
+ *     summary: Login user with email and password
+ *     tags: [Authentication]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - email
+ *               - password
+ *             properties:
+ *               email:
+ *                 type: string
+ *                 format: email
+ *                 description: User email address
+ *               password:
+ *                 type: string
+ *                 description: User password
+ *     responses:
+ *       200:
+ *         description: Login successful
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ApiResponse'
+ *       400:
+ *         description: Missing required fields
+ *       401:
+ *         description: Invalid credentials
+ */
+router.post('/login', AuthController.login);
 
 /**
  * @swagger
@@ -130,7 +167,7 @@ router.post('/super-admin/signup', AuthController.superAdminSignup);
  *     summary: Get current user profile
  *     tags: [Authentication]
  *     security:
- *       - ClerkAuth: []
+ *       - BearerAuth: []
  *     responses:
  *       200:
  *         description: User profile retrieved successfully
@@ -150,7 +187,7 @@ router.get('/profile', authenticateUser, AuthController.getProfile);
  *     summary: Update user profile
  *     tags: [Authentication]
  *     security:
- *       - ClerkAuth: []
+ *       - BearerAuth: []
  *     requestBody:
  *       required: true
  *       content:
@@ -182,12 +219,50 @@ router.put('/profile', authenticateUser, AuthController.updateProfile);
 
 /**
  * @swagger
+ * /api/auth/change-password:
+ *   post:
+ *     summary: Change user password
+ *     tags: [Authentication]
+ *     security:
+ *       - BearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - currentPassword
+ *               - newPassword
+ *             properties:
+ *               currentPassword:
+ *                 type: string
+ *                 description: Current password
+ *               newPassword:
+ *                 type: string
+ *                 description: New password
+ *     responses:
+ *       200:
+ *         description: Password changed successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ApiResponse'
+ *       400:
+ *         description: Missing required fields
+ *       401:
+ *         description: Current password is incorrect
+ */
+router.post('/change-password', authenticateUser, AuthController.changePassword);
+
+/**
+ * @swagger
  * /api/auth/users/{userId}/role:
  *   put:
  *     summary: Update user role (Super Admin only)
  *     tags: [Authentication]
  *     security:
- *       - ClerkAuth: []
+ *       - BearerAuth: []
  *     parameters:
  *       - in: path
  *         name: userId
@@ -225,7 +300,7 @@ router.put('/users/:userId/role', requireSuperAdmin, AuthController.updateUserRo
  *     summary: Get all users (Super Admin only)
  *     tags: [Authentication]
  *     security:
- *       - ClerkAuth: []
+ *       - BearerAuth: []
  *     responses:
  *       200:
  *         description: Users retrieved successfully
@@ -247,7 +322,7 @@ router.get('/users', requireSuperAdmin, AuthController.getAllUsers);
  *     summary: Update user status (Super Admin only)
  *     tags: [Authentication]
  *     security:
- *       - ClerkAuth: []
+ *       - BearerAuth: []
  *     parameters:
  *       - in: path
  *         name: userId
@@ -284,7 +359,7 @@ router.put('/users/:userId/status', requireSuperAdmin, AuthController.updateUser
  *     summary: Create new user (Super Admin only)
  *     tags: [Authentication]
  *     security:
- *       - ClerkAuth: []
+ *       - BearerAuth: []
  *     requestBody:
  *       required: true
  *       content:
@@ -346,9 +421,10 @@ router.post('/users', requireSuperAdmin, AuthController.createUser);
  * /api/auth/users/{userId}:
  *   get:
  *     summary: Get user by ID (Super Admin only)
- *     tags: [Authentication]
+ *     tags:
+ *       - Authentication
  *     security:
- *       - ClerkAuth: []
+ *       - BearerAuth: []
  *     parameters:
  *       - in: path
  *         name: userId
@@ -379,7 +455,7 @@ router.get('/users/:userId', requireSuperAdmin, AuthController.getUserById);
  *     summary: Update user (Super Admin only)
  *     tags: [Authentication]
  *     security:
- *       - ClerkAuth: []
+ *       - BearerAuth: []
  *     parameters:
  *       - in: path
  *         name: userId
@@ -425,7 +501,7 @@ router.put('/users/:userId', requireSuperAdmin, AuthController.updateUser);
  *     summary: Delete user (Super Admin only)
  *     tags: [Authentication]
  *     security:
- *       - ClerkAuth: []
+ *       - BearerAuth: []
  *     parameters:
  *       - in: path
  *         name: userId

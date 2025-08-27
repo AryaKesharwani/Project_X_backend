@@ -14,7 +14,7 @@ router.use(authenticateUser);
  *     summary: Create a new ticket
  *     tags: [Tickets]
  *     security:
- *       - ClerkAuth: []
+ *       - BearerAuth: []
  *     requestBody:
  *       required: true
  *       content:
@@ -71,7 +71,7 @@ router.post('/', TicketController.createTicket);
  *     summary: Get all tickets with filters
  *     tags: [Tickets]
  *     security:
- *       - ClerkAuth: []
+ *       - BearerAuth: []
  *     parameters:
  *       - in: query
  *         name: status
@@ -115,7 +115,7 @@ router.get('/', TicketController.getTickets);
  *     summary: Get ticket by ID
  *     tags: [Tickets]
  *     security:
- *       - ClerkAuth: []
+ *       - BearerAuth: []
  *     parameters:
  *       - in: path
  *         name: id
@@ -144,7 +144,7 @@ router.get('/:id', TicketController.getTicketById);
  *     summary: Update ticket status
  *     tags: [Tickets]
  *     security:
- *       - ClerkAuth: []
+ *       - BearerAuth: []
  *     parameters:
  *       - in: path
  *         name: id
@@ -185,7 +185,7 @@ router.put('/:id/status', TicketController.updateTicketStatus);
  *     summary: Assign ticket to staff member
  *     tags: [Tickets]
  *     security:
- *       - ClerkAuth: []
+ *       - BearerAuth: []
  *     parameters:
  *       - in: path
  *         name: id
@@ -224,7 +224,7 @@ router.put('/:id/assign', requireStaff, TicketController.assignTicket);
  *     summary: Delete ticket
  *     tags: [Tickets]
  *     security:
- *       - ClerkAuth: []
+ *       - BearerAuth: []
  *     parameters:
  *       - in: path
  *         name: id

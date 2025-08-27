@@ -115,11 +115,11 @@ export const errorHandler = (
     message = 'Token expired';
     code = 'JWT_EXPIRED_ERROR';
   }
-  // Handle Clerk errors
-  else if (error.message.includes('Clerk')) {
-    statusCode = 500;
-    message = 'Authentication service error';
-    code = 'CLERK_ERROR';
+  // Handle authentication errors
+  else if (error.message.includes('jwt') || error.message.includes('token')) {
+    statusCode = 401;
+    message = 'Authentication error';
+    code = 'AUTH_ERROR';
   }
 
   // Log error with context

@@ -1,4 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
+import jwt from 'jsonwebtoken';
 import { AuthenticationError, AuthorizationError, User, UserRole } from '../types';
 import { prisma } from '../config/prisma';
 
@@ -25,13 +26,12 @@ export const authenticateUser = async (
 
     const token = authHeader.substring(7); // Remove 'Bearer ' prefix
 
-    // For Clerk integration, treat the token as clerk_id
-    // In production, you would verify the Clerk JWT here
-    const clerkId = token;
-
-    // Fetch user from database by clerk_id
+    // Verify JWT token
+    const decoded = jwt.verify(token, process.env.JWT_SECRET!) as { userId: string };
+    
+    // Fetch user from database by user ID
     const user = await prisma.user.findUnique({
-      where: { clerk_id: clerkId },
+      where: { id: decoded.userId },
     });
 
     if (!user || !user.active) {
@@ -42,7 +42,11 @@ export const authenticateUser = async (
     req.user = user;
     next();
   } catch (error) {
-    next(error);
+    if (error instanceof jwt.JsonWebTokenError) {
+      next(new AuthenticationError('Invalid token'));
+    } else {
+      next(error);
+    }
   }
 };
 

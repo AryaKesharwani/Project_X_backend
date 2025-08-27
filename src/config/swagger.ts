@@ -29,18 +29,12 @@ const options = {
           scheme: 'bearer',
           bearerFormat: 'JWT'
         },
-        ClerkAuth: {
-          type: 'http',
-          scheme: 'bearer',
-          description: 'Clerk authentication token'
-        }
       },
       schemas: {
         User: {
           type: 'object',
           properties: {
             id: { type: 'string' },
-            clerk_id: { type: 'string' },
             email: { type: 'string', format: 'email' },
             first_name: { type: 'string' },
             last_name: { type: 'string' },
@@ -53,6 +47,7 @@ const options = {
             room_number: { type: 'string' },
             preferences: { type: 'object' },
             active: { type: 'boolean' },
+            last_active: { type: 'string', format: 'date-time' },
             created_at: { type: 'string', format: 'date-time' },
             updated_at: { type: 'string', format: 'date-time' }
           }

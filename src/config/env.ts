@@ -13,10 +13,6 @@ const envSchema = z.object({
   // Database
   DATABASE_URL: z.string().min(1, 'DATABASE_URL is required'),
   
-  // Clerk Configuration
-  CLERK_SECRET_KEY: z.string().min(1, 'CLERK_SECRET_KEY is required'),
-  CLERK_PUBLISHABLE_KEY: z.string().optional(),
-  
   // Frontend URL (for CORS)
   FRONTEND_URL: z.string().url().default('http://localhost:5173'),
   
@@ -57,11 +53,6 @@ export const serverConfig = {
 
 export const databaseConfig = {
   url: env.DATABASE_URL,
-};
-
-export const clerkConfig = {
-  secretKey: env.CLERK_SECRET_KEY,
-  publishableKey: env.CLERK_PUBLISHABLE_KEY,
 };
 
 export const securityConfig = {

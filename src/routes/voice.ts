@@ -14,7 +14,7 @@ router.use(authenticateUser);
  *     summary: Process voice input and create ticket
  *     tags: [Voice]
  *     security:
- *       - ClerkAuth: []
+ *       - BearerAuth: []
  *     requestBody:
  *       required: true
  *       content:
@@ -59,7 +59,7 @@ router.post('/process', VoiceController.processVoice);
  *     summary: Get voice sessions for a user
  *     tags: [Voice]
  *     security:
- *       - ClerkAuth: []
+ *       - BearerAuth: []
  *     parameters:
  *       - in: query
  *         name: user_id
@@ -97,7 +97,7 @@ router.get('/sessions', VoiceController.getVoiceSessions);
  *     summary: Get voice session by ID
  *     tags: [Voice]
  *     security:
- *       - ClerkAuth: []
+ *       - BearerAuth: []
  *     parameters:
  *       - in: path
  *         name: id
@@ -126,7 +126,7 @@ router.get('/sessions/:id', VoiceController.getVoiceSessionById);
  *     summary: Update voice session
  *     tags: [Voice]
  *     security:
- *       - ClerkAuth: []
+ *       - BearerAuth: []
  *     parameters:
  *       - in: path
  *         name: id
@@ -173,7 +173,7 @@ router.put('/sessions/:id', VoiceController.updateVoiceSession);
  *     summary: Delete voice session
  *     tags: [Voice]
  *     security:
- *       - ClerkAuth: []
+ *       - BearerAuth: []
  *     parameters:
  *       - in: path
  *         name: id

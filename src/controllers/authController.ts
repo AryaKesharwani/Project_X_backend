@@ -1,15 +1,16 @@
 import { Request, Response, NextFunction } from 'express';
+import bcrypt from 'bcryptjs';
+import jwt from 'jsonwebtoken';
 import { prisma } from '../config/prisma';
 import { APIResponse, User, UserRole } from '../types';
-import { ClerkService } from '../services/clerkService';
 
 export class AuthController {
-  // Register user with Clerk (for Clerk integration)
+  // Register user with local authentication
   static async register(req: Request, res: Response, next: NextFunction) {
     try {
       const {
-        clerk_id,
         email,
+        password,
         first_name,
         last_name,
         role = UserRole.guest,
@@ -20,32 +21,36 @@ export class AuthController {
       } = req.body;
 
       // Validate required fields
-      if (!clerk_id || !email) {
+      if (!email || !password) {
         return res.status(400).json({
           success: false,
-          error: 'Missing required fields: clerk_id and email',
+          error: 'Missing required fields: email and password',
           timestamp: new Date().toISOString()
         } as APIResponse);
       }
 
       // Check if user already exists
       const existingUser = await prisma.user.findUnique({
-        where: { clerk_id },
+        where: { email },
       });
 
       if (existingUser) {
         return res.status(409).json({
           success: false,
-          error: 'User already exists',
+          error: 'User with this email already exists',
           timestamp: new Date().toISOString()
         } as APIResponse);
       }
 
+      // Hash password
+      const saltRounds = 12;
+      const password_hash = await bcrypt.hash(password, saltRounds);
+
       // Create new user
       const user = await prisma.user.create({
         data: {
-          clerk_id,
           email,
+          password_hash,
           first_name,
           last_name,
           role,
@@ -61,12 +66,96 @@ export class AuthController {
         },
       });
 
+      // Generate JWT token
+      const token = jwt.sign(
+        { userId: user.id, email: user.email, role: user.role },
+        process.env.JWT_SECRET!,
+        { expiresIn: '7d' }
+      );
+
+      // Remove password hash from response
+      const { password_hash: _, ...userWithoutPassword } = user;
+
       res.status(201).json({
         success: true,
-        data: user,
+        data: { user: userWithoutPassword, token },
         message: 'User registered successfully',
         timestamp: new Date().toISOString()
-      } as APIResponse<User>);
+      } as APIResponse<{ user: Omit<User, 'password_hash'>; token: string }>);
+
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  // Login user
+  static async login(req: Request, res: Response, next: NextFunction) {
+    try {
+      const { email, password } = req.body;
+
+      // Validate required fields
+      if (!email || !password) {
+        return res.status(400).json({
+          success: false,
+          error: 'Missing required fields: email and password',
+          timestamp: new Date().toISOString()
+        } as APIResponse);
+      }
+
+      // Find user by email
+      const user = await prisma.user.findUnique({
+        where: { email },
+      });
+
+      if (!user || !user.active) {
+        return res.status(401).json({
+          success: false,
+          error: 'Invalid credentials or user inactive',
+          timestamp: new Date().toISOString()
+        } as APIResponse);
+      }
+
+      // Check if user has password (for users created before password auth)
+      if (!user.password_hash) {
+        return res.status(401).json({
+          success: false,
+          error: 'Account requires password reset',
+          timestamp: new Date().toISOString()
+        } as APIResponse);
+      }
+
+      // Verify password
+      const isPasswordValid = await bcrypt.compare(password, user.password_hash);
+      if (!isPasswordValid) {
+        return res.status(401).json({
+          success: false,
+          error: 'Invalid credentials',
+          timestamp: new Date().toISOString()
+        } as APIResponse);
+      }
+
+      // Update last active
+      await prisma.user.update({
+        where: { id: user.id },
+        data: { last_active: new Date() }
+      });
+
+      // Generate JWT token
+      const token = jwt.sign(
+        { userId: user.id, email: user.email, role: user.role },
+        process.env.JWT_SECRET!,
+        { expiresIn: '7d' }
+      );
+
+      // Remove password hash from response
+      const { password_hash: _, ...userWithoutPassword } = user;
+
+      res.json({
+        success: true,
+        data: { user: userWithoutPassword, token },
+        message: 'Login successful',
+        timestamp: new Date().toISOString()
+      } as APIResponse<{ user: Omit<User, 'password_hash'>; token: string }>);
 
     } catch (error) {
       next(error);
@@ -136,73 +225,50 @@ export class AuthController {
 
       console.log('✅ No existing super admin found');
 
-      try {
-        console.log('🔐 Attempting to create user in Clerk...');
-        
-        // Create user in Clerk first
-        const clerkUser = await ClerkService.createUser({
+      // Hash password
+      const saltRounds = 12;
+      const password_hash = await bcrypt.hash(password, saltRounds);
+
+      console.log('💾 Creating super admin in database...');
+      
+      // Create super admin user in our database
+      const user = await prisma.user.create({
+        data: {
           email,
-          firstName: first_name,
-          lastName: last_name,
-          password, // Include password for Clerk
-          publicMetadata: {
-            role: UserRole.super_admin,
-            hotel_id,
-            preferences: {
-              language: 'en',
-              voice_enabled: true,
-              notifications_enabled: true,
-              theme: 'dark'
-            }
-          }
-        });
-
-        console.log('✅ User created in Clerk successfully:', clerkUser.id);
-
-        console.log('💾 Creating user in database...');
-        
-        // Create super admin user in our database with Clerk ID
-        const user = await prisma.user.create({
-          data: {
-            clerk_id: clerkUser.id, // Use actual Clerk ID
-            email,
-            first_name,
-            last_name,
-            role: UserRole.super_admin,
-            hotel_id,
-            preferences: {
-              language: 'en',
-              voice_enabled: true,
-              notifications_enabled: true,
-              theme: 'dark'
-            },
+          password_hash,
+          first_name,
+          last_name,
+          role: UserRole.super_admin,
+          hotel_id,
+          preferences: {
+            language: 'en',
+            voice_enabled: true,
+            notifications_enabled: true,
+            theme: 'dark'
           },
-        });
+        },
+      });
 
-        console.log('✅ User created in database successfully:', user.id);
+      console.log('✅ User created in database successfully:', user.id);
 
-        // Generate JWT token for super admin
-        // Note: In production, you should use a proper JWT library and secret
-        const token = `super_admin_token_${user.id}_${Date.now()}`;
+      // Generate JWT token for super admin
+      const token = jwt.sign(
+        { userId: user.id, email: user.email, role: user.role },
+        process.env.JWT_SECRET!,
+        { expiresIn: '7d' }
+      );
 
-        console.log('🎉 Super admin signup completed successfully');
+      console.log('🎉 Super admin signup completed successfully');
 
-        res.status(201).json({
-          success: true,
-          data: { user, token },
-          message: 'Super admin account created successfully in both Clerk and database',
-          timestamp: new Date().toISOString()
-        } as APIResponse<{ user: User; token: string }>);
+      // Remove password hash from response
+      const { password_hash: _, ...userWithoutPassword } = user;
 
-      } catch (clerkError) {
-        // If Clerk creation fails, clean up and return error
-        console.error('❌ Failed to create super admin in Clerk:', clerkError);
-        return res.status(500).json({
-          success: false,
-          error: 'Failed to create super admin in authentication system',
-          timestamp: new Date().toISOString()
-        } as APIResponse);
-      }
+      res.status(201).json({
+        success: true,
+        data: { user: userWithoutPassword, token },
+        message: 'Super admin account created successfully',
+        timestamp: new Date().toISOString()
+      } as APIResponse<{ user: Omit<User, 'password_hash'>; token: string }>);
 
     } catch (error) {
       console.error('❌ Unexpected error in super admin signup:', error);
@@ -215,6 +281,7 @@ export class AuthController {
     try {
       const {
         email,
+        password,
         first_name,
         last_name,
         role,
@@ -225,10 +292,10 @@ export class AuthController {
       } = req.body;
 
       // Validate required fields
-      if (!email || !first_name || !last_name || !role) {
+      if (!email || !password || !first_name || !last_name || !role) {
         return res.status(400).json({
           success: false,
-          error: 'Missing required fields: email, first_name, last_name, and role',
+          error: 'Missing required fields: email, password, first_name, last_name, and role',
           timestamp: new Date().toISOString()
         } as APIResponse);
       }
@@ -246,62 +313,39 @@ export class AuthController {
         } as APIResponse);
       }
 
-      try {
-        // Create user in Clerk first
-        const clerkUser = await ClerkService.createUser({
+      // Hash password
+      const saltRounds = 12;
+      const password_hash = await bcrypt.hash(password, saltRounds);
+
+      // Create user in our database
+      const user = await prisma.user.create({
+        data: {
           email,
-          firstName: first_name,
-          lastName: last_name,
-          publicMetadata: {
-            role,
-            hotel_id,
-            room_number,
-            phone_number,
-            preferences: preferences || {
-              language: 'en',
-              voice_enabled: true,
-              notifications_enabled: true,
-              theme: 'dark'
-            }
-          }
-        });
-
-        // Create user in our database with Clerk ID
-        const user = await prisma.user.create({
-          data: {
-            clerk_id: clerkUser.id,
-            email,
-            first_name,
-            last_name,
-            role,
-            hotel_id,
-            room_number,
-            phone_number,
-            preferences: preferences || {
-              language: 'en',
-              voice_enabled: true,
-              notifications_enabled: true,
-              theme: 'dark'
-            },
+          password_hash,
+          first_name,
+          last_name,
+          role,
+          hotel_id,
+          room_number,
+          phone_number,
+          preferences: preferences || {
+            language: 'en',
+            voice_enabled: true,
+            notifications_enabled: true,
+            theme: 'dark'
           },
-        });
+        },
+      });
 
-        res.status(201).json({
-          success: true,
-          data: user,
-          message: 'User created successfully in both Clerk and database',
-          timestamp: new Date().toISOString()
-        } as APIResponse<User>);
+      // Remove password hash from response
+      const { password_hash: _, ...userWithoutPassword } = user;
 
-      } catch (clerkError) {
-        // If Clerk creation fails, clean up and return error
-        console.error('Failed to create user in Clerk:', clerkError);
-        return res.status(500).json({
-          success: false,
-          error: 'Failed to create user in authentication system',
-          timestamp: new Date().toISOString()
-        } as APIResponse);
-      }
+      res.status(201).json({
+        success: true,
+        data: userWithoutPassword,
+        message: 'User created successfully',
+        timestamp: new Date().toISOString()
+      } as APIResponse<Omit<User, 'password_hash'>>);
 
     } catch (error) {
       next(error);
@@ -315,6 +359,21 @@ export class AuthController {
 
       const user = await prisma.user.findUnique({
         where: { id: userId },
+        select: {
+          id: true,
+          email: true,
+          first_name: true,
+          last_name: true,
+          phone_number: true,
+          role: true,
+          hotel_id: true,
+          room_number: true,
+          preferences: true,
+          active: true,
+          last_active: true,
+          created_at: true,
+          updated_at: true
+        }
       });
 
       if (!user) {
@@ -329,7 +388,7 @@ export class AuthController {
         success: true,
         data: user,
         timestamp: new Date().toISOString()
-      } as APIResponse<User>);
+      } as APIResponse<Omit<User, 'password_hash'>>);
 
     } catch (error) {
       next(error);
@@ -362,49 +421,41 @@ export class AuthController {
         } as APIResponse);
       }
 
-      try {
-        // Update user in Clerk
-        await ClerkService.updateUser(existingUser.clerk_id, {
-          firstName: first_name,
-          lastName: last_name,
-          publicMetadata: {
-            role: existingUser.role,
-            hotel_id,
-            room_number,
-            phone_number,
-            preferences
-          }
-        });
+      // Update user in our database
+      const updatedUser = await prisma.user.update({
+        where: { id: userId },
+        data: {
+          first_name,
+          last_name,
+          phone_number,
+          hotel_id,
+          room_number,
+          preferences,
+          updated_at: new Date(),
+        },
+        select: {
+          id: true,
+          email: true,
+          first_name: true,
+          last_name: true,
+          phone_number: true,
+          role: true,
+          hotel_id: true,
+          room_number: true,
+          preferences: true,
+          active: true,
+          last_active: true,
+          created_at: true,
+          updated_at: true
+        }
+      });
 
-        // Update user in our database
-        const updatedUser = await prisma.user.update({
-          where: { id: userId },
-          data: {
-            first_name,
-            last_name,
-            phone_number,
-            hotel_id,
-            room_number,
-            preferences,
-            updated_at: new Date(),
-          },
-        });
-
-        res.json({
-          success: true,
-          data: updatedUser,
-          message: 'User updated successfully in both Clerk and database',
-          timestamp: new Date().toISOString()
-        } as APIResponse<User>);
-
-      } catch (clerkError) {
-        console.error('Failed to update user in Clerk:', clerkError);
-        return res.status(500).json({
-          success: false,
-          error: 'Failed to update user in authentication system',
-          timestamp: new Date().toISOString()
-        } as APIResponse);
-      }
+      res.json({
+        success: true,
+        data: updatedUser,
+        message: 'User updated successfully',
+        timestamp: new Date().toISOString()
+      } as APIResponse<Omit<User, 'password_hash'>>);
 
     } catch (error) {
       next(error);
@@ -438,29 +489,16 @@ export class AuthController {
         } as APIResponse);
       }
 
-      try {
-        // Delete user from Clerk
-        await ClerkService.deleteUser(existingUser.clerk_id);
+      // Delete user from database
+      await prisma.user.delete({
+        where: { id: userId },
+      });
 
-        // Delete user from database
-        await prisma.user.delete({
-          where: { id: userId },
-        });
-
-        res.json({
-          success: true,
-          message: 'User deleted successfully from both Clerk and database',
-          timestamp: new Date().toISOString()
-        } as APIResponse);
-
-      } catch (clerkError) {
-        console.error('Failed to delete user from Clerk:', clerkError);
-        return res.status(500).json({
-          success: false,
-          error: 'Failed to delete user from authentication system',
-          timestamp: new Date().toISOString()
-        } as APIResponse);
-      }
+      res.json({
+        success: true,
+        message: 'User deleted successfully',
+        timestamp: new Date().toISOString()
+      } as APIResponse);
 
     } catch (error) {
       next(error);
@@ -470,11 +508,13 @@ export class AuthController {
   // Get current user profile
   static async getProfile(req: Request, res: Response, next: NextFunction) {
     try {
+      const { password_hash: _, ...userWithoutPassword } = req.user!;
+      
       res.json({
         success: true,
-        data: req.user,
+        data: userWithoutPassword,
         timestamp: new Date().toISOString()
-      } as APIResponse<User>);
+      } as APIResponse<Omit<User, 'password_hash'>>);
     } catch (error) {
       next(error);
     }
@@ -501,6 +541,21 @@ export class AuthController {
           room_number,
           updated_at: new Date()
         },
+        select: {
+          id: true,
+          email: true,
+          first_name: true,
+          last_name: true,
+          phone_number: true,
+          role: true,
+          hotel_id: true,
+          room_number: true,
+          preferences: true,
+          active: true,
+          last_active: true,
+          created_at: true,
+          updated_at: true
+        }
       });
 
       res.json({
@@ -508,7 +563,7 @@ export class AuthController {
         data: updatedUser,
         message: 'Profile updated successfully',
         timestamp: new Date().toISOString()
-      } as APIResponse<User>);
+      } as APIResponse<Omit<User, 'password_hash'>>);
 
     } catch (error) {
       next(error);
@@ -535,6 +590,21 @@ export class AuthController {
           role,
           updated_at: new Date()
         },
+        select: {
+          id: true,
+          email: true,
+          first_name: true,
+          last_name: true,
+          phone_number: true,
+          role: true,
+          hotel_id: true,
+          room_number: true,
+          preferences: true,
+          active: true,
+          last_active: true,
+          created_at: true,
+          updated_at: true
+        }
       });
 
       res.json({
@@ -542,7 +612,7 @@ export class AuthController {
         data: updatedUser,
         message: 'User role updated successfully',
         timestamp: new Date().toISOString()
-      } as APIResponse<User>);
+      } as APIResponse<Omit<User, 'password_hash'>>);
 
     } catch (error) {
       next(error);
@@ -572,7 +642,7 @@ export class AuthController {
         success: true,
         data: users,
         timestamp: new Date().toISOString()
-      } as APIResponse<User[]>);
+      } as APIResponse<Omit<User, 'password_hash'>[]>);
 
     } catch (error) {
       next(error);
@@ -599,6 +669,21 @@ export class AuthController {
           active,
           updated_at: new Date()
         },
+        select: {
+          id: true,
+          email: true,
+          first_name: true,
+          last_name: true,
+          phone_number: true,
+          role: true,
+          hotel_id: true,
+          room_number: true,
+          preferences: true,
+          active: true,
+          last_active: true,
+          created_at: true,
+          updated_at: true
+        }
       });
 
       res.json({
@@ -606,7 +691,68 @@ export class AuthController {
         data: updatedUser,
         message: `User ${active ? 'activated' : 'deactivated'} successfully`,
         timestamp: new Date().toISOString()
-      } as APIResponse<User>);
+      } as APIResponse<Omit<User, 'password_hash'>>);
+
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  // Change password
+  static async changePassword(req: Request, res: Response, next: NextFunction) {
+    try {
+      const { currentPassword, newPassword } = req.body;
+
+      if (!currentPassword || !newPassword) {
+        return res.status(400).json({
+          success: false,
+          error: 'Current password and new password are required',
+          timestamp: new Date().toISOString()
+        } as APIResponse);
+      }
+
+      // Get current user with password hash
+      const user = await prisma.user.findUnique({
+        where: { id: req.user!.id },
+        select: { password_hash: true }
+      });
+
+      if (!user?.password_hash) {
+        return res.status(400).json({
+          success: false,
+          error: 'Account requires password reset',
+          timestamp: new Date().toISOString()
+        } as APIResponse);
+      }
+
+      // Verify current password
+      const isCurrentPasswordValid = await bcrypt.compare(currentPassword, user.password_hash);
+      if (!isCurrentPasswordValid) {
+        return res.status(401).json({
+          success: false,
+          error: 'Current password is incorrect',
+          timestamp: new Date().toISOString()
+        } as APIResponse);
+      }
+
+      // Hash new password
+      const saltRounds = 12;
+      const newPasswordHash = await bcrypt.hash(newPassword, saltRounds);
+
+      // Update password
+      await prisma.user.update({
+        where: { id: req.user!.id },
+        data: { 
+          password_hash: newPasswordHash,
+          updated_at: new Date()
+        }
+      });
+
+      res.json({
+        success: true,
+        message: 'Password changed successfully',
+        timestamp: new Date().toISOString()
+      } as APIResponse);
 
     } catch (error) {
       next(error);
