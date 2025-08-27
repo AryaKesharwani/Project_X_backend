@@ -1,408 +1,245 @@
 import { Router } from 'express';
-import { prisma } from '../config/prisma';
-import { APIResponse, Ticket, PaginatedResponse, UserRole, WebSocketMessageType } from '../types';
+import { TicketController } from '../controllers/ticketController';
 import { authenticateUser, requireStaff } from '../middleware/auth';
-import { getWebSocketService } from '../services/websocket';
 
 const router = Router();
 
-// Create new ticket
-router.post('/', authenticateUser, async (req, res, next) => {
-  try {
-    const {
-      title,
-      description,
-      department,
-      room_number,
-      priority = 'medium',
-      estimated_time,
-      guest_notes
-    } = req.body;
+// Apply authentication middleware to all ticket routes
+router.use(authenticateUser);
 
-    const userId = req.user!.id;
-    const userRole = req.user!.role;
+/**
+ * @swagger
+ * /api/tickets:
+ *   post:
+ *     summary: Create a new ticket
+ *     tags: [Tickets]
+ *     security:
+ *       - ClerkAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - title
+ *               - description
+ *               - department
+ *             properties:
+ *               title:
+ *                 type: string
+ *                 description: Ticket title
+ *               description:
+ *                 type: string
+ *                 description: Ticket description
+ *               department:
+ *                 type: string
+ *                 enum: [housekeeping, maintenance, front_desk, concierge, room_service]
+ *                 description: Department to handle the ticket
+ *               priority:
+ *                 type: string
+ *                 enum: [low, medium, high, urgent]
+ *                 default: medium
+ *                 description: Ticket priority
+ *               room_number:
+ *                 type: string
+ *                 description: Room number
+ *               guest_notes:
+ *                 type: string
+ *                 description: Notes from guest
+ *               estimated_time:
+ *                 type: integer
+ *                 description: Estimated completion time in minutes
+ *     responses:
+ *       201:
+ *         description: Ticket created successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ApiResponse'
+ *       400:
+ *         description: Missing required fields
+ *       401:
+ *         description: Unauthorized
+ */
+router.post('/', TicketController.createTicket);
 
-    // Create ticket
-    const ticket = await prisma.ticket.create({
-      data: {
-        title,
-        description,
-        status: 'pending',
-        priority,
-        department,
-        room_number,
-        guest_notes,
-        estimated_time,
-        created_by: userId,
-        assigned_to: getAutoAssignment(userRole, department)
-      },
-      include: {
-        creator: true,
-        assignee: true
-      }
-    });
+/**
+ * @swagger
+ * /api/tickets:
+ *   get:
+ *     summary: Get all tickets with filters
+ *     tags: [Tickets]
+ *     security:
+ *       - ClerkAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: status
+ *         schema:
+ *           type: string
+ *           enum: [pending, in_progress, completed, cancelled]
+ *         description: Filter by ticket status
+ *       - in: query
+ *         name: priority
+ *         schema:
+ *           type: string
+ *           enum: [low, medium, high, urgent]
+ *         description: Filter by ticket priority
+ *       - in: query
+ *         name: department
+ *         schema:
+ *           type: string
+ *           enum: [housekeeping, maintenance, front_desk, concierge, room_service]
+ *         description: Filter by department
+ *       - in: query
+ *         name: room_number
+ *         schema:
+ *           type: string
+ *         description: Filter by room number
+ *     responses:
+ *       200:
+ *         description: Tickets retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ApiResponse'
+ *       401:
+ *         description: Unauthorized
+ */
+router.get('/', TicketController.getTickets);
 
-    // Send WebSocket notification
-    const wsService = getWebSocketService();
-    if (wsService) {
-      wsService.broadcastToRole('housekeeping', {
-        type: WebSocketMessageType.TICKET_UPDATE,
-        payload: {
-          action: 'created',
-          ticket,
-          message: `New ${department} request: ${title}`
-        },
-        timestamp: new Date().toISOString()
-      });
-    }
+/**
+ * @swagger
+ * /api/tickets/{id}:
+ *   get:
+ *     summary: Get ticket by ID
+ *     tags: [Tickets]
+ *     security:
+ *       - ClerkAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Ticket ID
+ *     responses:
+ *       200:
+ *         description: Ticket retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ApiResponse'
+ *       401:
+ *         description: Unauthorized
+ *       404:
+ *         description: Ticket not found
+ */
+router.get('/:id', TicketController.getTicketById);
 
-    res.status(201).json({
-      success: true,
-      data: ticket,
-      message: 'Ticket created successfully',
-      timestamp: new Date().toISOString()
-    } as APIResponse<Ticket>);
+/**
+ * @swagger
+ * /api/tickets/{id}/status:
+ *   put:
+ *     summary: Update ticket status
+ *     tags: [Tickets]
+ *     security:
+ *       - ClerkAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Ticket ID
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - status
+ *             properties:
+ *               status:
+ *                 type: string
+ *                 enum: [pending, in_progress, completed, cancelled]
+ *                 description: New ticket status
+ *               staff_notes:
+ *                 type: string
+ *                 description: Staff notes about the status change
+ *     responses:
+ *       200:
+ *         description: Ticket status updated successfully
+ *       401:
+ *         description: Unauthorized
+ *       404:
+ *         description: Ticket not found
+ */
+router.put('/:id/status', TicketController.updateTicketStatus);
 
-  } catch (error) {
-    next(error);
-  }
-});
+/**
+ * @swagger
+ * /api/tickets/{id}/assign:
+ *   put:
+ *     summary: Assign ticket to staff member
+ *     tags: [Tickets]
+ *     security:
+ *       - ClerkAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Ticket ID
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - assigned_to
+ *             properties:
+ *               assigned_to:
+ *                 type: string
+ *                 description: User ID to assign the ticket to
+ *     responses:
+ *       200:
+ *         description: Ticket assigned successfully
+ *       401:
+ *         description: Unauthorized
+ *       403:
+ *         description: Forbidden - Requires staff access
+ *       404:
+ *         description: Ticket not found
+ */
+router.put('/:id/assign', requireStaff, TicketController.assignTicket);
 
-// Get tickets with role-based filtering
-router.get('/', authenticateUser, async (req, res, next) => {
-  try {
-    const {
-      page = 1,
-      limit = 20,
-      status,
-      priority,
-      department,
-      room_number,
-      assigned_to
-    } = req.query;
-
-    const userId = req.user!.id;
-    const userRole = req.user!.role;
-    const offset = (Number(page) - 1) * Number(limit);
-
-    let whereClause: any = {};
-
-    // Apply role-based filtering
-    if (userRole === UserRole.guest) {
-      whereClause.created_by = userId;
-    } else if (userRole === UserRole.housekeeping) {
-      whereClause.OR = [
-        { department: 'housekeeping' },
-        { assigned_to: userId }
-      ];
-    } else if (userRole === UserRole.lobby_manager) {
-      whereClause.department = { in: ['front_desk', 'concierge', 'room_service'] };
-    }
-    // General managers and super admins see all tickets (no additional filtering)
-
-    // Apply filters
-    if (status && status !== 'all') {
-      whereClause.status = status;
-    }
-    if (priority && priority !== 'all') {
-      whereClause.priority = priority;
-    }
-    if (department && department !== 'all') {
-      whereClause.department = department;
-    }
-    if (room_number) {
-      whereClause.room_number = room_number;
-    }
-    if (assigned_to) {
-      whereClause.assigned_to = assigned_to;
-    }
-
-    // Get total count
-    const total = await prisma.ticket.count({ where: whereClause });
-
-    // Get tickets with pagination
-    const tickets = await prisma.ticket.findMany({
-      where: whereClause,
-      include: {
-        creator: true,
-        assignee: true
-      },
-      skip: offset,
-      take: Number(limit),
-      orderBy: { created_at: 'desc' }
-    });
-
-    res.json({
-      success: true,
-      data: tickets,
-      pagination: {
-        page: Number(page),
-        limit: Number(limit),
-        total,
-        pages: Math.ceil(total / Number(limit))
-      },
-      timestamp: new Date().toISOString()
-    } as PaginatedResponse<Ticket>);
-
-  } catch (error) {
-    next(error);
-  }
-});
-
-// Get ticket by ID
-router.get('/:id', authenticateUser, async (req, res, next) => {
-  try {
-    const { id } = req.params;
-    const userId = req.user!.id;
-    const userRole = req.user!.role;
-
-    const ticket = await prisma.ticket.findUnique({
-      where: { id },
-      include: {
-        creator: true,
-        assignee: true,
-        voice_session: true
-      }
-    });
-
-    if (!ticket) {
-      return res.status(404).json({
-        success: false,
-        error: 'Ticket not found',
-        timestamp: new Date().toISOString()
-      } as APIResponse);
-    }
-
-    // Check access permissions
-    if (userRole === UserRole.guest && ticket.created_by !== userId) {
-      return res.status(403).json({
-        success: false,
-        error: 'Access denied',
-        timestamp: new Date().toISOString()
-      } as APIResponse);
-    }
-
-    res.json({
-      success: true,
-      data: ticket,
-      timestamp: new Date().toISOString()
-    } as APIResponse<Ticket>);
-
-  } catch (error) {
-    next(error);
-  }
-});
-
-// Update ticket status
-router.put('/:id/status', authenticateUser, requireStaff, async (req, res, next) => {
-  try {
-    const { id } = req.params;
-    const { status, staff_notes } = req.body;
-    const userId = req.user!.id;
-
-    // Get current ticket
-    const currentTicket = await prisma.ticket.findUnique({
-      where: { id }
-    });
-
-    if (!currentTicket) {
-      return res.status(404).json({
-        success: false,
-        error: 'Ticket not found',
-        timestamp: new Date().toISOString()
-      } as APIResponse);
-    }
-
-    // Update ticket
-    const ticket = await prisma.ticket.update({
-      where: { id },
-      data: {
-        status,
-        staff_notes,
-        completed_at: status === 'completed' ? new Date() : null
-      },
-      include: {
-        creator: true,
-        assignee: true
-      }
-    });
-
-    // Send WebSocket notification
-    const wsService = getWebSocketService();
-    if (wsService) {
-      wsService.broadcastToRole('housekeeping', {
-        type: WebSocketMessageType.TICKET_UPDATE,
-        payload: {
-          action: 'status_updated',
-          ticket,
-          message: `Ticket ${id} status updated to ${status}`
-        },
-        timestamp: new Date().toISOString()
-      });
-    }
-
-    res.json({
-      success: true,
-      data: ticket,
-      message: 'Ticket status updated successfully',
-      timestamp: new Date().toISOString()
-    } as APIResponse<Ticket>);
-
-  } catch (error) {
-    next(error);
-  }
-});
-
-// Assign ticket to staff member
-router.put('/:id/assign', authenticateUser, requireStaff, async (req, res, next) => {
-  try {
-    const { id } = req.params;
-    const { assigned_to } = req.body;
-
-    // Verify assignee exists and has appropriate role
-    const assignee = await prisma.user.findUnique({
-      where: { id: assigned_to }
-    });
-
-    if (!assignee || !assignee.active) {
-      return res.status(400).json({
-        success: false,
-        error: 'Invalid assignee',
-        timestamp: new Date().toISOString()
-      } as APIResponse);
-    }
-
-    const ticket = await prisma.ticket.update({
-      where: { id },
-      data: { assigned_to },
-      include: {
-        creator: true,
-        assignee: true
-      }
-    });
-
-    // Send WebSocket notification
-    const wsService = getWebSocketService();
-    if (wsService) {
-      wsService.broadcastToRole('housekeeping', {
-        type: WebSocketMessageType.NOTIFICATION,
-        payload: {
-          title: 'New Assignment',
-          message: `You have been assigned ticket: ${ticket.title}`,
-          ticket_id: id
-        },
-        timestamp: new Date().toISOString()
-      });
-    }
-
-    res.json({
-      success: true,
-      data: ticket,
-      message: 'Ticket assigned successfully',
-      timestamp: new Date().toISOString()
-    } as APIResponse<Ticket>);
-
-  } catch (error) {
-    next(error);
-  }
-});
-
-// Delete ticket (Super Admin only)
-router.delete('/:id', authenticateUser, requireStaff, async (req, res, next) => {
-  try {
-    const { id } = req.params;
-
-    await prisma.ticket.delete({
-      where: { id }
-    });
-
-    res.json({
-      success: true,
-      message: 'Ticket deleted successfully',
-      timestamp: new Date().toISOString()
-    } as APIResponse);
-
-  } catch (error) {
-    next(error);
-  }
-});
-
-// Get ticket statistics
-router.get('/stats/overview', authenticateUser, requireStaff, async (req, res, next) => {
-  try {
-    const userId = req.user!.id;
-    const userRole = req.user!.role;
-
-    let whereClause: any = {};
-
-    // Apply role-based filtering
-    if (userRole === UserRole.housekeeping) {
-      whereClause.OR = [
-        { department: 'housekeeping' },
-        { assigned_to: userId }
-      ];
-    } else if (userRole === UserRole.lobby_manager) {
-      whereClause.department = { in: ['front_desk', 'concierge', 'room_service'] };
-    }
-
-    // Get status statistics
-    const statusData = await prisma.ticket.groupBy({
-      by: ['status'],
-      where: whereClause,
-      _count: { status: true }
-    });
-
-    const statusStats = statusData.reduce((acc, item) => {
-      acc[item.status] = item._count.status;
-      return acc;
-    }, {} as Record<string, number>);
-
-    // Get priority statistics
-    const priorityData = await prisma.ticket.groupBy({
-      by: ['priority'],
-      where: whereClause,
-      _count: { priority: true }
-    });
-
-    const priorityStats = priorityData.reduce((acc, item) => {
-      acc[item.priority] = item._count.priority;
-      return acc;
-    }, {} as Record<string, number>);
-
-    // Get department statistics
-    const departmentData = await prisma.ticket.groupBy({
-      by: ['department'],
-      where: whereClause,
-      _count: { department: true }
-    });
-
-    const departmentStats = departmentData.reduce((acc, item) => {
-      acc[item.department] = item._count.department;
-      return acc;
-    }, {} as Record<string, number>);
-
-    res.json({
-      success: true,
-      data: {
-        statusDistribution: statusStats,
-        priorityDistribution: priorityStats,
-        departmentDistribution: departmentStats,
-        totalTickets: Object.values(statusStats).reduce((a, b) => a + b, 0),
-        lastUpdated: new Date().toISOString()
-      },
-      timestamp: new Date().toISOString()
-    } as APIResponse);
-
-  } catch (error) {
-    next(error);
-  }
-});
-
-// Helper function to auto-assign tickets based on department
-function getAutoAssignment(userRole: UserRole, department: string): string | null {
-  // For now, return null (no auto-assignment)
-  // This can be enhanced with intelligent assignment logic
-  return null;
-}
+/**
+ * @swagger
+ * /api/tickets/{id}:
+ *   delete:
+ *     summary: Delete ticket
+ *     tags: [Tickets]
+ *     security:
+ *       - ClerkAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Ticket ID
+ *     responses:
+ *       200:
+ *         description: Ticket deleted successfully
+ *       401:
+ *         description: Unauthorized
+ *       404:
+ *         description: Ticket not found
+ */
+router.delete('/:id', TicketController.deleteTicket);
 
 export default router;

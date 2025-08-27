@@ -1,122 +1,134 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
-import { createServer } from 'http';
-import { WebSocketServer } from 'ws';
-
-dotenv.config();
-
-// Import routes
-import authRoutes from './routes/auth';
-import userRoutes from './routes/users';
-import voiceRoutes from './routes/voice';
-import ticketRoutes from './routes/tickets';
-
-// Import middleware
+import swaggerUi from 'swagger-ui-express';
+import { specs } from './config/swagger';
+import { initializeWebSocket } from './services/websocket';
 import { errorHandler } from './middleware/errorHandler';
 import { logger } from './middleware/logger';
 
-// Import services
-import { initializeWebSocket } from './services/websocket';
+// Import routes
+import authRoutes from './routes/auth';
+import ticketRoutes from './routes/tickets';
+import voiceRoutes from './routes/voice';
+import healthRoutes from './routes/health';
 
-// Import config
-import { checkDatabaseConnection } from './config/prisma';
+// Load environment variables
+dotenv.config();
 
 const app = express();
-const server = createServer(app);
-
-// WebSocket server with error handling
-let wss: WebSocketServer;
-try {
-  wss = new WebSocketServer({ 
-    server,
-    path: '/ws', // Explicit path to avoid routing issues
-    perMessageDeflate: false, // Disable compression to avoid issues
-    maxPayload: 1024 * 1024 // 1MB max payload
-  });
-  
-  // Add error handling for WebSocket server
-  wss.on('error', (error) => {
-    console.error('❌ WebSocket server error:', error);
-  });
-  
-} catch (error) {
-  console.error('❌ Failed to create WebSocket server:', error);
-  wss = null as any;
-}
+const PORT = process.env.PORT || 3001;
 
 // Middleware
 app.use(cors({
   origin: process.env.FRONTEND_URL || 'http://localhost:5173',
   credentials: true
 }));
+
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
+
+// Logging middleware
 app.use(logger);
+
+// Swagger UI
+app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(specs, {
+  customCss: '.swagger-ui .topbar { display: none }',
+  customSiteTitle: 'LionKey AI API Documentation',
+  customfavIcon: '/favicon.ico'
+}));
 
 // Health check endpoint
 app.get('/health', (req, res) => {
   res.json({
-    status: 'healthy',
-    timestamp: new Date().toISOString(),
-    service: 'LionKey AI Backend',
-    version: '1.0.0'
+    success: true,
+    data: {
+      status: 'healthy',
+      timestamp: new Date().toISOString(),
+      uptime: process.uptime(),
+      environment: process.env.NODE_ENV || 'development'
+    },
+    timestamp: new Date().toISOString()
   });
 });
 
-// API Routes
+// API routes
 app.use('/api/auth', authRoutes);
-app.use('/api/users', userRoutes);
-app.use('/api/voice', voiceRoutes);
 app.use('/api/tickets', ticketRoutes);
+app.use('/api/voice', voiceRoutes);
+app.use('/api/health', healthRoutes);
 
-// Initialize WebSocket only if server was created successfully
-if (wss) {
-  try {
-    initializeWebSocket(wss);
-    console.log('✅ WebSocket service initialized successfully');
-  } catch (error) {
-    console.error('❌ Failed to initialize WebSocket service:', error);
-  }
-} else {
-  console.warn('⚠️ WebSocket server not available - real-time features disabled');
-}
-
-// Check database connection on startup
-checkDatabaseConnection();
-
-// Error handling middleware (should be last)
+// Error handling middleware
 app.use(errorHandler);
 
-// 404 handler - use more specific pattern for better compatibility
-app.use('/*', (req, res) => {
+// 404 handler
+app.use('*', (req, res) => {
   res.status(404).json({
+    success: false,
     error: 'Route not found',
-    message: `The route ${req.method} ${req.originalUrl} does not exist`
+    timestamp: new Date().toISOString()
   });
 });
 
-const PORT = process.env.PORT || 3001;
+// Initialize WebSocket service
+let wsServer: any = null;
+let server: any = null;
 
-server.listen(PORT, () => {
-  console.log(`🚀 LionKey AI Backend running on port ${PORT}`);
-  if (wss) {
-    console.log(`📱 WebSocket server initialized on /ws`);
-  } else {
-    console.log(`⚠️ WebSocket server not available`);
-  }
-  console.log(`🔗 Frontend URL: ${process.env.FRONTEND_URL || 'http://localhost:5173'}`);
-  console.log(`🏥 Health check: http://localhost:${PORT}/health`);
-});
+try {
+  const { createServer } = require('http');
+  const { WebSocketServer } = require('ws');
+  
+  server = createServer(app);
+  
+  // Create WebSocket server
+  const wss = new WebSocketServer({ 
+    server,
+    path: '/ws',
+    perMessageDeflate: false,
+    maxPayload: 1024 * 1024
+  });
+  
+  wsServer = initializeWebSocket(wss);
+  console.log('✅ WebSocket service setup completed');
+  
+  // Start server with WebSocket
+  server.listen(PORT, () => {
+    console.log(`🚀 LionKey AI Backend running on port ${PORT}`);
+    console.log('📱 WebSocket server initialized on /ws');
+    console.log(`🔗 Frontend URL: ${process.env.FRONTEND_URL || 'http://localhost:5173'}`);
+    console.log(`🏥 Health check: http://localhost:${PORT}/health`);
+    console.log(`📚 API Documentation: http://localhost:${PORT}/api-docs`);
+  });
+  
+} catch (error) {
+  console.error('❌ Failed to initialize WebSocket service:', error);
+  
+  // Start server without WebSocket
+  server = app.listen(PORT, () => {
+    console.log(`🚀 LionKey AI Backend running on port ${PORT}`);
+    console.log('⚠️ WebSocket server not available');
+    console.log(`🔗 Frontend URL: ${process.env.FRONTEND_URL || 'http://localhost:5173'}`);
+    console.log(`🏥 Health check: http://localhost:${PORT}/health`);
+    console.log(`📚 API Documentation: http://localhost:${PORT}/api-docs`);
+  });
+}
+
+// Server startup is handled in the WebSocket initialization block
 
 // Graceful shutdown
 process.on('SIGTERM', () => {
-  console.log('🛑 SIGTERM received, shutting down gracefully');
-  if (wss) {
-    wss.close();
-  }
+  console.log('SIGTERM received, shutting down gracefully');
   server.close(() => {
-    console.log('✅ Process terminated');
+    console.log('Process terminated');
+    process.exit(0);
+  });
+});
+
+process.on('SIGINT', () => {
+  console.log('SIGINT received, shutting down gracefully');
+  server.close(() => {
+    console.log('Process terminated');
+    process.exit(0);
   });
 });
 
